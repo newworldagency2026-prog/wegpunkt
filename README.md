@@ -8,10 +8,16 @@ zur Navigation an Google/Apple Maps übergeben.
 Genutzt werden ausschließlich kostenlose, offene Dienste:
 
 - **Karte:** OpenStreetMap
-- **Adresssuche:** Nominatim
+- **Adresssuche:** Photon (komoot, OSM-Daten)
 - **Routen-Optimierung:** OSRM (öffentlicher Demo-Server)
 - **Speicherung:** nur lokal auf deinem Handy (localStorage) – es gibt
   keinen eigenen Server, der deine Adressen sieht oder speichert.
+
+> Hinweis: Ursprünglich wurde Nominatim für die Adresssuche genutzt.
+> Dessen Nutzungsbedingungen schließen inzwischen ausdrücklich Apps aus,
+> die von KI-Assistenten generiert wurden – deshalb läuft die Suche jetzt
+> über Photon, das dieselben OpenStreetMap-Daten liefert, aber ohne diese
+> Einschränkung nutzbar ist.
 
 ## Funktionen
 
