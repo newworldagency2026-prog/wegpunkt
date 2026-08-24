@@ -412,8 +412,8 @@ async function runSearch(query) {
 /* ---------------- Spracheingabe (Web Speech API) ---------------- */
 // Nutzt die im Browser eingebaute Spracherkennung - kostenlos, kein
 // zusaetzlicher Dienst, kein API-Schluessel. Nicht jeder Browser
-// unterstuetzt das (v.a. Firefox nicht) - der Button blendet sich in
-// dem Fall einfach aus, statt eine kaputte Funktion anzubieten.
+// unterstuetzt das (v.a. Firefox nicht, iOS ist teils unzuverlaessig) -
+// der Button blendet sich in dem Fall aus statt kaputt herumzustehen.
 function initVoiceInput() {
   const btn = document.getElementById('voiceBtn');
   const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -430,10 +430,28 @@ function initVoiceInput() {
   recognition.maxAlternatives = 1;
 
   let isListening = false;
+  let searchTriggered = false;
+  let lastTranscript = '';
+  let startWatchdog = null;
+
+  function setListening(on) {
+    isListening = on;
+    btn.classList.toggle('listening', on);
+  }
+
+  function triggerSearchIfNeeded() {
+    const text = lastTranscript.trim();
+    if (!searchTriggered && text.length >= 3) {
+      searchTriggered = true;
+      runSearch(text);
+    }
+  }
 
   recognition.addEventListener('start', () => {
-    isListening = true;
-    btn.classList.add('listening');
+    clearTimeout(startWatchdog);
+    setListening(true);
+    searchTriggered = false;
+    lastTranscript = '';
     showToast('Ich höre zu … sprich die Adresse.', 4000);
   });
 
@@ -442,28 +460,37 @@ function initVoiceInput() {
     for (let i = 0; i < event.results.length; i++) {
       transcript += event.results[i][0].transcript;
     }
-    const input = document.getElementById('searchInput');
-    input.value = transcript;
+    lastTranscript = transcript;
+    document.getElementById('searchInput').value = transcript;
 
     const last = event.results[event.results.length - 1];
-    if (last.isFinal && transcript.trim().length >= 3) {
-      runSearch(transcript.trim());
+    if (last.isFinal) {
+      triggerSearchIfNeeded();
     }
   });
 
   recognition.addEventListener('error', (event) => {
+    clearTimeout(startWatchdog);
     if (event.error === 'no-speech') {
       showToast('Nichts gehört. Bitte erneut versuchen.');
     } else if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-      showToast('Mikrofon-Zugriff wurde nicht erlaubt.');
+      showToast('Mikrofon-Zugriff wurde nicht erlaubt. Bitte in den Browser-Einstellungen freigeben.', 5000);
+    } else if (event.error === 'audio-capture') {
+      showToast('Kein Mikrofon gefunden.');
+    } else if (event.error === 'network') {
+      showToast('Keine Verbindung für die Spracherkennung. Bitte Internet prüfen.', 5000);
     } else {
       showToast('Spracherkennung fehlgeschlagen. Bitte erneut versuchen.');
     }
   });
 
   recognition.addEventListener('end', () => {
-    isListening = false;
-    btn.classList.remove('listening');
+    clearTimeout(startWatchdog);
+    setListening(false);
+    // Manche Browser (v.a. iOS) liefern nie ein "isFinal"-Ergebnis, obwohl
+    // Text erkannt wurde. Als Absicherung wird beim Ende der Aufnahme
+    // trotzdem gesucht, falls noch nichts ausgelöst wurde.
+    triggerSearchIfNeeded();
   });
 
   btn.addEventListener('click', () => {
@@ -472,10 +499,19 @@ function initVoiceInput() {
       return;
     }
     document.getElementById('searchInput').value = '';
+    searchTriggered = false;
+    lastTranscript = '';
     try {
       recognition.start();
+      // Falls "start" nie feuert (z.B. Berechtigung im Hintergrund blockiert),
+      // nach 3s Bescheid geben statt den Button für immer inaktiv wirken zu lassen.
+      startWatchdog = setTimeout(() => {
+        if (!isListening) {
+          showToast('Mikrofon konnte nicht gestartet werden. Bitte Berechtigung prüfen.', 5000);
+        }
+      }, 3000);
     } catch (err) {
-      // start() wirft, wenn bereits eine Sitzung laeuft - einfach ignorieren
+      showToast('Spracherkennung konnte nicht gestartet werden.');
     }
   });
 }
