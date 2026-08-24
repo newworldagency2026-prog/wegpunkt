@@ -409,6 +409,77 @@ async function runSearch(query) {
   }
 }
 
+/* ---------------- Spracheingabe (Web Speech API) ---------------- */
+// Nutzt die im Browser eingebaute Spracherkennung - kostenlos, kein
+// zusaetzlicher Dienst, kein API-Schluessel. Nicht jeder Browser
+// unterstuetzt das (v.a. Firefox nicht) - der Button blendet sich in
+// dem Fall einfach aus, statt eine kaputte Funktion anzubieten.
+function initVoiceInput() {
+  const btn = document.getElementById('voiceBtn');
+  const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+  if (!SpeechRecognitionCtor) {
+    btn.hidden = true;
+    return;
+  }
+
+  const recognition = new SpeechRecognitionCtor();
+  recognition.lang = 'de-DE';
+  recognition.continuous = false;
+  recognition.interimResults = true;
+  recognition.maxAlternatives = 1;
+
+  let isListening = false;
+
+  recognition.addEventListener('start', () => {
+    isListening = true;
+    btn.classList.add('listening');
+    showToast('Ich höre zu … sprich die Adresse.', 4000);
+  });
+
+  recognition.addEventListener('result', (event) => {
+    let transcript = '';
+    for (let i = 0; i < event.results.length; i++) {
+      transcript += event.results[i][0].transcript;
+    }
+    const input = document.getElementById('searchInput');
+    input.value = transcript;
+
+    const last = event.results[event.results.length - 1];
+    if (last.isFinal && transcript.trim().length >= 3) {
+      runSearch(transcript.trim());
+    }
+  });
+
+  recognition.addEventListener('error', (event) => {
+    if (event.error === 'no-speech') {
+      showToast('Nichts gehört. Bitte erneut versuchen.');
+    } else if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+      showToast('Mikrofon-Zugriff wurde nicht erlaubt.');
+    } else {
+      showToast('Spracherkennung fehlgeschlagen. Bitte erneut versuchen.');
+    }
+  });
+
+  recognition.addEventListener('end', () => {
+    isListening = false;
+    btn.classList.remove('listening');
+  });
+
+  btn.addEventListener('click', () => {
+    if (isListening) {
+      recognition.stop();
+      return;
+    }
+    document.getElementById('searchInput').value = '';
+    try {
+      recognition.start();
+    } catch (err) {
+      // start() wirft, wenn bereits eine Sitzung laeuft - einfach ignorieren
+    }
+  });
+}
+
 /* ---------------- Standort ---------------- */
 function initLocate() {
   document.getElementById('locateBtn').addEventListener('click', () => {
@@ -735,6 +806,7 @@ function init() {
   loadState();
   initMap();
   initSearch();
+  initVoiceInput();
   initLocate();
   initSettings();
   initSheet();
