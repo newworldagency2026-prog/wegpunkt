@@ -269,6 +269,7 @@ function updateTripStatsVisibility() {
 /* ---------------- Adresssuche (Nominatim) ---------------- */
 let searchAbort = null;
 let searchDebounceTimer = null;
+let lastResults = [];
 
 function initSearch() {
   const input = document.getElementById('searchInput');
@@ -280,16 +281,70 @@ function initSearch() {
     if (q.length < 3) {
       list.hidden = true;
       list.innerHTML = '';
+      lastResults = [];
       return;
     }
     searchDebounceTimer = setTimeout(() => runSearch(q), CONFIG.SEARCH_DEBOUNCE_MS);
   });
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      confirmAddFromInput();
+    }
+  });
+
+  document.getElementById('addStopBtn').addEventListener('click', confirmAddFromInput);
 
   document.addEventListener('click', (e) => {
     if (!list.contains(e.target) && e.target !== input) {
       list.hidden = true;
     }
   });
+}
+
+// Fügt einen Stopp direkt über den "+"-Button hinzu: nimmt den besten
+// bereits geladenen Treffer, oder sucht bei Bedarf neu, statt zwingend
+// einen Vorschlag aus der Liste antippen zu müssen.
+async function confirmAddFromInput() {
+  const input = document.getElementById('searchInput');
+  const list = document.getElementById('suggestList');
+  const query = input.value.trim();
+
+  if (!list.hidden && lastResults.length > 0) {
+    const r = lastResults[0];
+    addStop(parseFloat(r.lat), parseFloat(r.lon), shortAddress(r.display_name));
+    input.value = '';
+    list.hidden = true;
+    list.innerHTML = '';
+    lastResults = [];
+    return;
+  }
+
+  if (query.length < 3) {
+    showToast('Bitte eine Adresse eingeben (mind. 3 Zeichen).');
+    return;
+  }
+
+  showToast('Adresse wird gesucht …', 1500);
+  try {
+    const url = `${CONFIG.NOMINATIM_URL}/search?format=jsonv2&addressdetails=0&limit=1&q=${encodeURIComponent(query)}`;
+    const res = await fetch(url, { headers: { Accept: 'application/json' } });
+    if (!res.ok) throw new Error('search failed');
+    const results = await res.json();
+    if (!results.length) {
+      showToast('Keine Adresse gefunden.');
+      return;
+    }
+    const r = results[0];
+    addStop(parseFloat(r.lat), parseFloat(r.lon), shortAddress(r.display_name));
+    input.value = '';
+    list.hidden = true;
+    list.innerHTML = '';
+    lastResults = [];
+  } catch (err) {
+    showToast('Suche fehlgeschlagen. Bitte erneut versuchen.');
+  }
 }
 
 async function runSearch(query) {
@@ -302,6 +357,7 @@ async function runSearch(query) {
     const res = await fetch(url, { signal: searchAbort.signal, headers: { Accept: 'application/json' } });
     if (!res.ok) throw new Error('search failed');
     const results = await res.json();
+    lastResults = results;
 
     list.innerHTML = '';
     if (!results.length) {
