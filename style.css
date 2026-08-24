@@ -1,5 +1,6 @@
 /* ============ Design Tokens ============ */
 :root {
+  color-scheme: light;
   --bg-chrome: #0F1720;
   --bg-chrome-2: #17222E;
   --surface: #F6F4EF;
@@ -113,6 +114,8 @@ button, input { font-family: inherit; }
   font-size: 15px;
   padding: 11px 4px;
   color: var(--text);
+  -webkit-text-fill-color: var(--text);
+  caret-color: var(--text);
   outline: none;
 }
 #searchInput::placeholder { color: var(--text-muted); }
