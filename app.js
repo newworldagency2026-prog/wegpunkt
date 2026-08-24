@@ -4,14 +4,14 @@
    Wegpunkt – einfacher Multi-Stopp-Routenplaner
    Nutzt ausschliesslich kostenlose, schluessellose Dienste:
    - OpenStreetMap Tiles (Karte)
-   - Nominatim (Adresssuche / Geocoding)
+   - Photon / komoot (Adresssuche / Geocoding, OSM-Daten)
    - OSRM Demo-Server (Routen-Optimierung, "Trip"-Dienst)
    Alle Daten (Stopps, Einstellungen) bleiben nur auf diesem
    Geraet (localStorage) - es gibt keinen eigenen Server.
    ========================================================= */
 
 const CONFIG = {
-  NOMINATIM_URL: 'https://nominatim.openstreetmap.org',
+  PHOTON_URL: 'https://photon.komoot.io',
   OSRM_URL: 'https://router.project-osrm.org',
   STORAGE_KEY: 'wegpunkt_state_v1',
   SEARCH_DEBOUNCE_MS: 450,
@@ -76,6 +76,23 @@ function shortAddress(displayName) {
 
 function isIOS() {
   return /iP(hone|ad|od)/.test(navigator.userAgent);
+}
+
+// Photon liefert GeoJSON mit einzelnen Adressteilen (properties) statt
+// eines fertigen Textes. Diese Funktion baut daraus eine lesbare Adresse,
+// im selben {lat, lon, display_name}-Format wie zuvor verwendet.
+function normalizePhotonFeature(feature) {
+  const p = (feature && feature.properties) || {};
+  const coords = (feature && feature.geometry && feature.geometry.coordinates) || [0, 0];
+  const [lon, lat] = coords;
+
+  const line1 = p.street
+    ? p.street + (p.housenumber ? ' ' + p.housenumber : '')
+    : (p.name || '');
+  const line2 = [p.postcode, p.city || p.town || p.village || p.state].filter(Boolean).join(' ');
+  const display_name = [line1, line2, p.country].filter(Boolean).join(', ') || 'Unbekannte Adresse';
+
+  return { lat, lon, display_name };
 }
 
 /* ---------------- Karte (Leaflet) ---------------- */
@@ -149,12 +166,13 @@ async function onMapClick(e) {
   showToast('Adresse wird ermittelt …', 1500);
   try {
     const res = await fetch(
-      `${CONFIG.NOMINATIM_URL}/reverse?format=jsonv2&lat=${lat}&lon=${lng}&zoom=18`,
+      `${CONFIG.PHOTON_URL}/reverse?lon=${lng}&lat=${lat}&lang=de`,
       { headers: { Accept: 'application/json' } }
     );
     if (!res.ok) throw new Error('reverse geocode failed');
     const data = await res.json();
-    const address = data.display_name ? shortAddress(data.display_name) : `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+    const feature = (data.features || [])[0];
+    const address = feature ? normalizePhotonFeature(feature).display_name : `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
     addStop(lat, lng, address);
   } catch (err) {
     addStop(lat, lng, `${lat.toFixed(5)}, ${lng.toFixed(5)}`);
@@ -328,10 +346,11 @@ async function confirmAddFromInput() {
 
   showToast('Adresse wird gesucht …', 1500);
   try {
-    const url = `${CONFIG.NOMINATIM_URL}/search?format=jsonv2&addressdetails=0&limit=1&q=${encodeURIComponent(query)}`;
+    const url = `${CONFIG.PHOTON_URL}/api/?q=${encodeURIComponent(query)}&limit=1&lang=de`;
     const res = await fetch(url, { headers: { Accept: 'application/json' } });
     if (!res.ok) throw new Error('search failed');
-    const results = await res.json();
+    const data = await res.json();
+    const results = (data.features || []).map(normalizePhotonFeature);
     if (!results.length) {
       showToast('Keine Adresse gefunden.');
       return;
@@ -353,10 +372,11 @@ async function runSearch(query) {
   searchAbort = new AbortController();
 
   try {
-    const url = `${CONFIG.NOMINATIM_URL}/search?format=jsonv2&addressdetails=0&limit=6&q=${encodeURIComponent(query)}`;
+    const url = `${CONFIG.PHOTON_URL}/api/?q=${encodeURIComponent(query)}&limit=6&lang=de`;
     const res = await fetch(url, { signal: searchAbort.signal, headers: { Accept: 'application/json' } });
     if (!res.ok) throw new Error('search failed');
-    const results = await res.json();
+    const data = await res.json();
+    const results = (data.features || []).map(normalizePhotonFeature);
     lastResults = results;
 
     list.innerHTML = '';
