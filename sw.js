@@ -1,6 +1,9 @@
-// Wegpunkt Service Worker – cached nur die App-Huelle (HTML/CSS/JS/Icons).
-// Karten-Kacheln, Adresssuche und Routenberechnung brauchen weiterhin Internet.
-const CACHE_NAME = 'wegpunkt-shell-v1';
+// Wegpunkt Service Worker – "Network-first": versucht bei jeder Anfrage
+// zuerst frische Dateien vom Netz zu laden (garantiert, dass Updates
+// ankommen) und nutzt den Cache nur als Fallback, wenn kein Internet
+// verfuegbar ist. Karten-Kacheln, Adresssuche und Routenberechnung
+// brauchen weiterhin Internet.
+const CACHE_NAME = 'wegpunkt-shell-v2';
 const SHELL_FILES = [
   './',
   './index.html',
@@ -29,13 +32,15 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
-  // Nur eigene App-Huelle aus dem Cache bedienen (same-origin, GET).
   if (event.request.method !== 'GET' || url.origin !== self.location.origin) return;
 
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      if (cached) return cached;
-      return fetch(event.request).catch(() => cached);
-    })
+    fetch(event.request)
+      .then((networkResponse) => {
+        const copy = networkResponse.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+        return networkResponse;
+      })
+      .catch(() => caches.match(event.request))
   );
 });
