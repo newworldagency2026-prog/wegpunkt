@@ -127,6 +127,8 @@ button, input { font-family: inherit; }
   cursor: pointer;
 }
 .icon-btn:active { background: var(--accent); color: #fff; }
+.icon-btn-accent { background: var(--accent); color: #fff; }
+.icon-btn-accent:active { background: var(--accent-dark); }
 
 .suggest-list {
   position: absolute;
