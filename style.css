@@ -109,6 +109,7 @@ button, input { font-family: inherit; }
 }
 #searchInput {
   flex: 1;
+  min-width: 0;
   border: none;
   background: transparent;
   font-size: 15px;
@@ -132,6 +133,18 @@ button, input { font-family: inherit; }
 .icon-btn:active { background: var(--accent); color: #fff; }
 .icon-btn-accent { background: var(--accent); color: #fff; }
 .icon-btn-accent:active { background: var(--accent-dark); }
+.icon-btn.listening {
+  background: var(--danger);
+  color: #fff;
+  animation: pulse-listen 1.1s ease-in-out infinite;
+}
+@keyframes pulse-listen {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(198, 68, 68, 0.45); }
+  50% { box-shadow: 0 0 0 8px rgba(198, 68, 68, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .icon-btn.listening { animation: none; }
+}
 
 .suggest-list {
   position: absolute;
