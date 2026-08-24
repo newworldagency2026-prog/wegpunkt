@@ -96,7 +96,7 @@ function normalizePhotonFeature(feature) {
 }
 
 /* ---------------- Karte (Leaflet) ---------------- */
-let map, markerLayer, routeLayer, startMarker;
+let map, markerLayer, routeLayer, liveLocationLayer, startMarker;
 
 function initMap() {
   map = L.map('map', { zoomControl: false, attributionControl: true })
@@ -111,6 +111,7 @@ function initMap() {
 
   markerLayer = L.layerGroup().addTo(map);
   routeLayer = L.layerGroup().addTo(map);
+  liveLocationLayer = L.layerGroup().addTo(map);
 
   map.on('click', onMapClick);
 }
@@ -138,17 +139,20 @@ function renderMarkers() {
   }
 
   state.stops.forEach((s, i) => {
+    const isTarget = navState.active && !s.done && s.id === navState.targetStopId;
     const m = L.marker([s.lat, s.lon], {
-      icon: pinDivIcon(String(i + 1), s.done ? 'done' : ''),
+      icon: pinDivIcon(String(i + 1), s.done ? 'done' : (isTarget ? 'target' : '')),
     }).bindPopup(s.address);
     markerLayer.addLayer(m);
     bounds.push([s.lat, s.lon]);
   });
 
-  if (bounds.length === 1) {
-    map.setView(bounds[0], 15);
-  } else if (bounds.length > 1) {
-    map.fitBounds(bounds, { padding: [60, 60] });
+  if (!navState.active) {
+    if (bounds.length === 1) {
+      map.setView(bounds[0], 15);
+    } else if (bounds.length > 1) {
+      map.fitBounds(bounds, { padding: [60, 60] });
+    }
   }
 }
 
@@ -263,7 +267,7 @@ function renderList() {
     li.querySelector('.stop-main').addEventListener('click', () => toggleDone(s.id));
     li.querySelector('[data-act="up"]').addEventListener('click', (ev) => { ev.stopPropagation(); moveStop(s.id, -1); });
     li.querySelector('[data-act="down"]').addEventListener('click', (ev) => { ev.stopPropagation(); moveStop(s.id, 1); });
-    li.querySelector('[data-act="nav"]').addEventListener('click', (ev) => { ev.stopPropagation(); navigateToStop(s); });
+    li.querySelector('[data-act="nav"]').addEventListener('click', (ev) => { ev.stopPropagation(); startNavigation(s.id); });
     li.querySelector('[data-act="del"]').addEventListener('click', (ev) => { ev.stopPropagation(); removeStop(s.id); });
 
     list.appendChild(li);
@@ -277,11 +281,10 @@ function updateTripStatsVisibility() {
     box.hidden = false;
     document.getElementById('statDistance').textContent = state.route.distanceKm.toFixed(1);
     document.getElementById('statDuration').textContent = Math.round(state.route.durationMin);
-    navAllBtn.hidden = false;
   } else {
     box.hidden = true;
-    navAllBtn.hidden = true;
   }
+  navAllBtn.hidden = state.stops.length === 0;
 }
 
 /* ---------------- Adresssuche (Nominatim) ---------------- */
@@ -557,27 +560,155 @@ function navigateToStop(stop) {
   window.open(url, '_blank');
 }
 
-function navigateWholeRoute() {
-  if (!state.stops.length) return;
-  const pts = [];
-  if (state.settings.useStart && state.currentLocation) {
-    pts.push(`${state.currentLocation.lat},${state.currentLocation.lon}`);
+/* ---------------- In-App-Navigation ---------------- */
+// Zeigt Route, Live-Standort und aktuellen Zielstopp direkt in der App an,
+// statt zu einer externen Karten-App zu wechseln.
+let navState = {
+  active: false,
+  watchId: null,
+  targetStopId: null,
+  followMode: true,
+  youAreHereMarker: null,
+};
+
+function haversineMeters(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const toRad = (d) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function formatDistance(meters) {
+  if (meters < 1000) return `${Math.round(meters)} m`;
+  return `${(meters / 1000).toFixed(1)} km`;
+}
+
+function nextUndoneStop() {
+  return state.stops.find((s) => !s.done) || null;
+}
+
+function disableFollow() {
+  navState.followMode = false;
+  document.getElementById('navRecenterBtn').hidden = false;
+}
+
+function startNavigation(targetStopId) {
+  if (!('geolocation' in navigator)) {
+    showToast('Standort wird von diesem Browser nicht unterstützt.');
+    return;
   }
-  state.stops.forEach(s => pts.push(`${s.lat},${s.lon}`));
+  const target = targetStopId
+    ? state.stops.find((s) => s.id === targetStopId)
+    : nextUndoneStop();
+  if (!target) {
+    showToast('Alle Stopps sind bereits erledigt.');
+    return;
+  }
 
-  const origin = pts[0];
-  const destination = state.settings.roundtrip ? origin : pts[pts.length - 1];
-  const waypoints = pts.slice(1, state.settings.roundtrip ? pts.length : pts.length - 1);
+  navState.active = true;
+  navState.targetStopId = target.id;
+  navState.followMode = true;
 
-  const params = new URLSearchParams({
-    api: '1',
-    origin,
-    destination,
-    travelmode: 'driving',
+  document.getElementById('sheet').hidden = true;
+  document.getElementById('navPanel').hidden = false;
+  document.getElementById('navRecenterBtn').hidden = true;
+  updateNavTargetUI();
+  renderMarkers();
+
+  map.off('dragstart', disableFollow);
+  map.on('dragstart', disableFollow);
+
+  if (navState.watchId != null) navigator.geolocation.clearWatch(navState.watchId);
+  navState.watchId = navigator.geolocation.watchPosition(onNavPosition, onNavError, {
+    enableHighAccuracy: true,
+    maximumAge: 2000,
+    timeout: 15000,
   });
-  if (waypoints.length) params.set('waypoints', waypoints.join('|'));
+}
 
-  window.open(`https://www.google.com/maps/dir/?${params.toString()}`, '_blank');
+function onNavPosition(pos) {
+  const { latitude: lat, longitude: lon } = pos.coords;
+  state.currentLocation = { lat, lon };
+
+  if (!navState.youAreHereMarker) {
+    navState.youAreHereMarker = L.marker([lat, lon], {
+      icon: L.divIcon({ className: '', html: '<div class="you-are-here"></div>', iconSize: [16, 16], iconAnchor: [8, 8] }),
+      zIndexOffset: 1000,
+    });
+    liveLocationLayer.addLayer(navState.youAreHereMarker);
+  } else {
+    navState.youAreHereMarker.setLatLng([lat, lon]);
+  }
+
+  if (navState.followMode) {
+    map.setView([lat, lon], Math.max(map.getZoom(), 16), { animate: true });
+  }
+
+  updateNavDistance(lat, lon);
+}
+
+function onNavError() {
+  showToast('Standort nicht verfügbar. Navigation beendet.');
+  stopNavigation();
+}
+
+function updateNavTargetUI() {
+  const target = state.stops.find((s) => s.id === navState.targetStopId);
+  const idx = state.stops.findIndex((s) => s.id === navState.targetStopId);
+  document.getElementById('navTargetAddress').textContent = target ? target.address : '–';
+  document.getElementById('navTargetIndex').textContent = idx >= 0 ? `(${idx + 1}/${state.stops.length})` : '';
+}
+
+function updateNavDistance(lat, lon) {
+  const target = state.stops.find((s) => s.id === navState.targetStopId);
+  if (!target) return;
+  const meters = haversineMeters(lat, lon, target.lat, target.lon);
+  document.getElementById('navTargetDistance').textContent = formatDistance(meters) + ' Luftlinie';
+}
+
+function markNavTargetDone() {
+  if (!navState.targetStopId) return;
+  toggleDone(navState.targetStopId);
+  const next = nextUndoneStop();
+  if (!next) {
+    showToast('Alle Stopps erledigt! 🎉');
+    stopNavigation();
+    return;
+  }
+  navState.targetStopId = next.id;
+  updateNavTargetUI();
+  renderMarkers();
+  showToast('Nächster Stopp: ' + next.address);
+}
+
+function stopNavigation() {
+  if (navState.watchId != null) {
+    navigator.geolocation.clearWatch(navState.watchId);
+  }
+  navState.active = false;
+  navState.watchId = null;
+  navState.targetStopId = null;
+  navState.followMode = true;
+  if (navState.youAreHereMarker) {
+    liveLocationLayer.removeLayer(navState.youAreHereMarker);
+    navState.youAreHereMarker = null;
+  }
+  map.off('dragstart', disableFollow);
+  document.getElementById('navPanel').hidden = true;
+  document.getElementById('navRecenterBtn').hidden = true;
+  document.getElementById('sheet').hidden = false;
+  renderMarkers();
+}
+
+function recenterOnMe() {
+  navState.followMode = true;
+  document.getElementById('navRecenterBtn').hidden = true;
+  if (navState.youAreHereMarker) {
+    map.setView(navState.youAreHereMarker.getLatLng(), Math.max(map.getZoom(), 16), { animate: true });
+  }
 }
 
 /* ---------------- PWA: Service Worker ---------------- */
@@ -610,8 +741,15 @@ function init() {
   initServiceWorker();
 
   document.getElementById('optimizeBtn').addEventListener('click', optimizeRoute);
-  document.getElementById('navigateAllBtn').addEventListener('click', navigateWholeRoute);
+  document.getElementById('navigateAllBtn').addEventListener('click', () => startNavigation(null));
   document.getElementById('addStopSheetBtn').addEventListener('click', focusAddressInput);
+  document.getElementById('navDoneBtn').addEventListener('click', markNavTargetDone);
+  document.getElementById('navStopBtn').addEventListener('click', stopNavigation);
+  document.getElementById('navExternalBtn').addEventListener('click', () => {
+    const target = state.stops.find((s) => s.id === navState.targetStopId);
+    if (target) navigateToStop(target);
+  });
+  document.getElementById('navRecenterBtn').addEventListener('click', recenterOnMe);
 
   renderMarkers();
   renderList();
