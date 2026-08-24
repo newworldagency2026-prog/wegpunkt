@@ -569,6 +569,16 @@ function initServiceWorker() {
   }
 }
 
+// Springt zum Adressfeld oben und öffnet die Tastatur - genutzt vom
+// dauerhaft sichtbaren "Adresse"-Button in der unteren Aktionsleiste.
+function focusAddressInput() {
+  const input = document.getElementById('searchInput');
+  if (typeof input.scrollIntoView === 'function') {
+    input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+  input.focus();
+}
+
 /* ---------------- Start ---------------- */
 function init() {
   loadState();
@@ -581,6 +591,7 @@ function init() {
 
   document.getElementById('optimizeBtn').addEventListener('click', optimizeRoute);
   document.getElementById('navigateAllBtn').addEventListener('click', navigateWholeRoute);
+  document.getElementById('addStopSheetBtn').addEventListener('click', focusAddressInput);
 
   renderMarkers();
   renderList();
